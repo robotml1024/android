@@ -75,6 +75,12 @@ private val DEFAULT_TASKS = listOf(
     StudyTask("课程大作业功能测试", 25, 0.5f)
 )
 
+private const val PREFS_NAME = "study_agent_prefs"
+private const val KEY_TODO_TASKS = "todo_tasks"
+private const val KEY_DONE_TASKS = "done_tasks"
+private const val LLM_API_URL = "" // TODO: 替换为你的大模型接口
+private const val LLM_API_KEY = "" // TODO: 替换为你的 API Key
+
 @OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
