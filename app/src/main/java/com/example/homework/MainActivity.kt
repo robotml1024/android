@@ -166,6 +166,10 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
             onDeleteTask = { task ->
                 tasks.remove(task)
                 persist()
+            },
+            onClearCompletedTasks = {
+                completedTasks.clear()
+                persist()
             }
         )
 
@@ -203,7 +207,8 @@ private fun PlannerCard(
     completedTasks: List<StudyTask>,
     onAddTask: () -> Unit,
     onCompleteTask: (StudyTask) -> Unit,
-    onDeleteTask: (StudyTask) -> Unit
+    onDeleteTask: (StudyTask) -> Unit,
+    onClearCompletedTasks: () -> Unit
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
         Column(Modifier.padding(14.dp)) {
@@ -213,7 +218,7 @@ private fun PlannerCard(
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = durationInput,
-                onValueChange = { onDurationInputChange(it.filter { ch -> ch.isDigit() }) },
+                onValueChange = { onDurationInputChange(it.filter(Char::isDigit)) },
                 label = { Text("预计时长(分钟)") },
                 modifier = Modifier.fillMaxWidth()
             )
@@ -232,8 +237,16 @@ private fun PlannerCard(
                 secondaryActionText = "撤销"
             )
 
+            Spacer(Modifier.height(10.dp))
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("已完成任务", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                if (completedTasks.isNotEmpty()) {
+                    TextButton(onClick = onClearCompletedTasks) { Text("清空已完成") }
+                }
+            }
+
             TaskSection(
-                title = "已完成任务",
+                title = "",
                 tasks = completedTasks,
                 maxVisibleItems = 3,
                 cardColor = Color(0xFFDFF5E4),
@@ -260,8 +273,10 @@ private fun TaskSection(
     secondaryActionText: String?
 ) {
     Spacer(Modifier.height(12.dp))
-    Text(title, fontWeight = FontWeight.SemiBold)
-    Spacer(Modifier.height(6.dp))
+    if (title.isNotBlank()) {
+        Text(title, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(6.dp))
+    }
     val maxHeight = (maxVisibleItems * 72).dp
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(8.dp),
