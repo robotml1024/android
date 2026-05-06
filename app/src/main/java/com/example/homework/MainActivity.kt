@@ -69,6 +69,18 @@ private const val KEY_DONE_TASKS = "done_tasks"
 private const val LLM_API_URL = "" // TODO: 替换为你的大模型接口
 private const val LLM_API_KEY = "" // TODO: 替换为你的 API Key
 
+private val DEFAULT_TASKS = listOf(
+    StudyTask("复习Kotlin协程", 40, 0.6f),
+    StudyTask("整理移动互联网知识点", 30, 0.4f),
+    StudyTask("课程大作业功能测试", 25, 0.5f)
+)
+
+private const val PREFS_NAME = "study_agent_prefs"
+private const val KEY_TODO_TASKS = "todo_tasks"
+private const val KEY_DONE_TASKS = "done_tasks"
+private const val LLM_API_URL = "" // TODO: 替换为你的大模型接口
+private const val LLM_API_KEY = "" // TODO: 替换为你的 API Key
+
 @OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -78,9 +90,7 @@ class MainActivity : ComponentActivity() {
             HomeworkTheme {
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
-                    topBar = {
-                        CenterAlignedTopAppBar(title = { Text("移动智能学习助手") })
-                    }
+                    topBar = { CenterAlignedTopAppBar(title = { Text("移动智能学习助手") }) }
                 ) { innerPadding ->
                     StudyAgentApp(Modifier.padding(innerPadding))
                 }
@@ -109,13 +119,7 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
         completedTasks.clear()
         completedTasks.addAll(loaded.second)
         if (tasks.isEmpty() && completedTasks.isEmpty()) {
-            tasks.addAll(
-                listOf(
-                    StudyTask("复习Kotlin协程", 40, 0.6f),
-                    StudyTask("整理移动互联网知识点", 30, 0.4f),
-                    StudyTask("课程大作业功能测试", 25, 0.5f)
-                )
-            )
+            tasks.addAll(DEFAULT_TASKS)
         }
     }
 
@@ -140,97 +144,168 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
-            Column(Modifier.padding(14.dp)) {
-                Text("1) 当前状态采集", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(8.dp))
-                Text("当前精力值：${energy.toInt()}%")
-                Slider(value = energy, onValueChange = { energy = it }, valueRange = 0f..100f)
-                Spacer(Modifier.height(8.dp))
-                Text("状态动作建议：${generateStatusAction(energy)}")
-            }
-        }
+        StatusCard(energy = energy, onEnergyChange = { energy = it })
 
-        Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
-            Column(Modifier.padding(14.dp)) {
-                Text("2) AI任务规划", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = taskInput,
-                    onValueChange = { taskInput = it },
-                    label = { Text("新增学习任务") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = durationInput,
-                    onValueChange = { durationInput = it.filter { ch -> ch.isDigit() } },
-                    label = { Text("预计时长(分钟)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(8.dp))
-                Button(onClick = {
-                    val minute = durationInput.toIntOrNull()?.coerceIn(5, 180) ?: 30
-                    if (taskInput.isNotBlank()) {
-                        val baseNeed = (minute / 180f).coerceIn(0.2f, 1f)
-                        val adjustedNeed = adjustEnergyNeedByCurrentEnergy(baseNeed, energy)
-                        tasks.add(StudyTask(taskInput.trim(), minute, adjustedNeed))
-                        taskInput = ""
-                        persist()
-                    }
-                }) { Text("加入计划") }
-
-                Spacer(Modifier.height(12.dp))
-                Text("待完成任务", fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(6.dp))
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(180.dp)) {
-                    items(tasks) { task ->
-                        Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F7FF))) {
-                            Row(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(task.title, fontWeight = FontWeight.SemiBold)
-                                    Text("${task.estimatedMinutes} 分钟 · 任务强度 ${"%.1f".format(task.energyNeed * 10)}")
-                                }
-                                Row {
-                                    TextButton(onClick = {
-                                        tasks.remove(task)
-                                        completedTasks.add(task)
-                                        persist()
-                                    }) { Text("完成") }
-                                    TextButton(onClick = {
-                                        tasks.remove(task)
-                                        persist()
-                                    }) { Text("撤销") }
-                                }
-                            }
-                        }
-                    }
+        PlannerCard(
+            taskInput = taskInput,
+            onTaskInputChange = { taskInput = it },
+            durationInput = durationInput,
+            onDurationInputChange = { durationInput = it },
+            tasks = tasks,
+            completedTasks = completedTasks,
+            onAddTask = {
+                val minute = durationInput.toIntOrNull()?.coerceIn(5, 180) ?: 30
+                if (taskInput.isNotBlank()) {
+                    val baseNeed = (minute / 180f).coerceIn(0.2f, 1f)
+                    val adjustedNeed = adjustEnergyNeedByCurrentEnergy(baseNeed, energy)
+                    tasks.add(StudyTask(taskInput.trim(), minute, adjustedNeed))
+                    taskInput = ""
+                    persist()
                 }
-
-                Spacer(Modifier.height(10.dp))
-                Text("已完成任务", fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(6.dp))
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(140.dp)) {
-                    items(completedTasks) { task ->
-                        Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFDFF5E4))) {
-                            Row(modifier = Modifier.fillMaxWidth().padding(10.dp)) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(task.title, fontWeight = FontWeight.SemiBold)
-                                    Text("${task.estimatedMinutes} 分钟 · 任务强度 ${"%.1f".format(task.energyNeed * 10)}")
-                                }
-                                Text("已完成", color = Color(0xFF2E7D32))
-                            }
-                        }
-                    }
-                }
+            },
+            onCompleteTask = { task ->
+                tasks.remove(task)
+                completedTasks.add(task)
+                persist()
+            },
+            onDeleteTask = { task ->
+                tasks.remove(task)
+                persist()
             }
-        }
+        )
 
         Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("3) 智能建议引擎", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text("完成率：${(completionRate * 100).toInt()}%")
                 Text(recommendation)
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusCard(energy: Float, onEnergyChange: (Float) -> Unit) {
+    Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
+        Column(Modifier.padding(14.dp)) {
+            Text("1) 当前状态采集", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            Text("当前精力值：${energy.toInt()}%")
+            Slider(value = energy, onValueChange = onEnergyChange, valueRange = 0f..100f)
+            Spacer(Modifier.height(8.dp))
+            Text("状态动作建议：${generateStatusAction(energy)}")
+        }
+    }
+}
+
+@Composable
+private fun PlannerCard(
+    taskInput: String,
+    onTaskInputChange: (String) -> Unit,
+    durationInput: String,
+    onDurationInputChange: (String) -> Unit,
+    tasks: List<StudyTask>,
+    completedTasks: List<StudyTask>,
+    onAddTask: () -> Unit,
+    onCompleteTask: (StudyTask) -> Unit,
+    onDeleteTask: (StudyTask) -> Unit
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
+        Column(Modifier.padding(14.dp)) {
+            Text("2) AI任务规划", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(value = taskInput, onValueChange = onTaskInputChange, label = { Text("新增学习任务") }, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = durationInput,
+                onValueChange = { onDurationInputChange(it.filter(Char::isDigit)) },
+                label = { Text("预计时长(分钟)") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = onAddTask) { Text("加入计划") }
+
+            TaskSection(
+                title = "待完成任务",
+                tasks = tasks,
+                height = 180.dp,
+                cardColor = Color(0xFFF5F7FF),
+                statusText = null,
+                onPrimaryAction = onCompleteTask,
+                primaryActionText = "完成",
+                onSecondaryAction = onDeleteTask,
+                secondaryActionText = "撤销"
+            )
+
+            TaskSection(
+                title = "已完成任务",
+                tasks = completedTasks,
+                height = 140.dp,
+                cardColor = Color(0xFFDFF5E4),
+                statusText = "已完成",
+                onPrimaryAction = null,
+                primaryActionText = null,
+                onSecondaryAction = null,
+                secondaryActionText = null
+            )
+        }
+    }
+}
+
+@Composable
+private fun TaskSection(
+    title: String,
+    tasks: List<StudyTask>,
+    height: androidx.compose.ui.unit.Dp,
+    cardColor: Color,
+    statusText: String?,
+    onPrimaryAction: ((StudyTask) -> Unit)?,
+    primaryActionText: String?,
+    onSecondaryAction: ((StudyTask) -> Unit)?,
+    secondaryActionText: String?
+) {
+    Spacer(Modifier.height(12.dp))
+    Text(title, fontWeight = FontWeight.SemiBold)
+    Spacer(Modifier.height(6.dp))
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(height)) {
+        items(tasks) { task ->
+            TaskItemCard(
+                task = task,
+                cardColor = cardColor,
+                statusText = statusText,
+                onPrimaryAction = onPrimaryAction,
+                primaryActionText = primaryActionText,
+                onSecondaryAction = onSecondaryAction,
+                secondaryActionText = secondaryActionText
+            )
+        }
+    }
+}
+
+@Composable
+private fun TaskItemCard(
+    task: StudyTask,
+    cardColor: Color,
+    statusText: String?,
+    onPrimaryAction: ((StudyTask) -> Unit)?,
+    primaryActionText: String?,
+    onSecondaryAction: ((StudyTask) -> Unit)?,
+    secondaryActionText: String?
+) {
+    Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = cardColor)) {
+        Row(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(task.title, fontWeight = FontWeight.SemiBold)
+                Text("${task.estimatedMinutes} 分钟 · 任务强度 ${"%.1f".format(task.energyNeed * 10)}")
+            }
+            when {
+                statusText != null -> Text(statusText, color = Color(0xFF2E7D32))
+                onPrimaryAction != null && primaryActionText != null && onSecondaryAction != null && secondaryActionText != null -> {
+                    Row {
+                        TextButton(onClick = { onPrimaryAction(task) }) { Text(primaryActionText) }
+                        TextButton(onClick = { onSecondaryAction(task) }) { Text(secondaryActionText) }
+                    }
+                }
             }
         }
     }
@@ -271,12 +346,7 @@ private suspend fun fetchAiRecommendation(tasks: List<StudyTask>, energy: Float)
             .put("energy", energy.toInt())
             .put("todoTasks", JSONArray().apply {
                 tasks.forEach {
-                    put(
-                        JSONObject()
-                            .put("title", it.title)
-                            .put("estimatedMinutes", it.estimatedMinutes)
-                            .put("energyNeed", it.energyNeed)
-                    )
+                    put(JSONObject().put("title", it.title).put("estimatedMinutes", it.estimatedMinutes).put("energyNeed", it.energyNeed))
                 }
             })
 
@@ -320,51 +390,6 @@ private fun jsonToTasks(raw: String?): List<StudyTask> {
         List(arr.length()) { index ->
             val obj = arr.getJSONObject(index)
             StudyTask(obj.optString("title"), obj.optInt("estimatedMinutes", 30), obj.optDouble("energyNeed", 0.4).toFloat())
-        }
-    } catch (_: Exception) {
-        emptyList()
-    }
-}
-
-private fun saveTasks(context: Context, todo: List<StudyTask>, done: List<StudyTask>) {
-    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    prefs.edit()
-        .putString(KEY_TODO_TASKS, tasksToJson(todo).toString())
-        .putString(KEY_DONE_TASKS, tasksToJson(done).toString())
-        .apply()
-}
-
-private fun loadTasks(context: Context): Pair<List<StudyTask>, List<StudyTask>> {
-    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    val todoJson = prefs.getString(KEY_TODO_TASKS, null)
-    val doneJson = prefs.getString(KEY_DONE_TASKS, null)
-    return Pair(jsonToTasks(todoJson), jsonToTasks(doneJson))
-}
-
-private fun tasksToJson(tasks: List<StudyTask>): JSONArray {
-    val arr = JSONArray()
-    tasks.forEach { task ->
-        arr.put(
-            JSONObject()
-                .put("title", task.title)
-                .put("estimatedMinutes", task.estimatedMinutes)
-                .put("energyNeed", task.energyNeed.toDouble())
-        )
-    }
-    return arr
-}
-
-private fun jsonToTasks(raw: String?): List<StudyTask> {
-    if (raw.isNullOrBlank()) return emptyList()
-    return try {
-        val arr = JSONArray(raw)
-        List(arr.length()) { index ->
-            val obj = arr.getJSONObject(index)
-            StudyTask(
-                title = obj.optString("title"),
-                estimatedMinutes = obj.optInt("estimatedMinutes", 30),
-                energyNeed = obj.optDouble("energyNeed", 0.4).toFloat()
-            )
         }
     } catch (_: Exception) {
         emptyList()
