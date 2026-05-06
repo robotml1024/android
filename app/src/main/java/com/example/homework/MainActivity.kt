@@ -213,7 +213,7 @@ private fun PlannerCard(
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = durationInput,
-                onValueChange = { onDurationInputChange(it.filter(Char::isDigit)) },
+                onValueChange = { onDurationInputChange(it.filter { ch -> ch.isDigit() }) },
                 label = { Text("预计时长(分钟)") },
                 modifier = Modifier.fillMaxWidth()
             )
@@ -223,7 +223,7 @@ private fun PlannerCard(
             TaskSection(
                 title = "待完成任务",
                 tasks = tasks,
-                height = 180.dp,
+                maxVisibleItems = 3,
                 cardColor = Color(0xFFF5F7FF),
                 statusText = null,
                 onPrimaryAction = onCompleteTask,
@@ -235,7 +235,7 @@ private fun PlannerCard(
             TaskSection(
                 title = "已完成任务",
                 tasks = completedTasks,
-                height = 140.dp,
+                maxVisibleItems = 3,
                 cardColor = Color(0xFFDFF5E4),
                 statusText = "已完成",
                 onPrimaryAction = null,
@@ -262,7 +262,7 @@ private fun TaskSection(
     Spacer(Modifier.height(12.dp))
     Text(title, fontWeight = FontWeight.SemiBold)
     Spacer(Modifier.height(6.dp))
-    val maxHeight = (maxVisibleItems * 64).dp
+    val maxHeight = (maxVisibleItems * 72).dp
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.heightIn(max = maxHeight)
@@ -331,7 +331,6 @@ private suspend fun fetchAiRecommendation(tasks: List<StudyTask>, energy: Float)
     if (LLM_API_URL.isBlank()) {
         return "（待接入大模型 API）当前有 ${tasks.size} 个待完成任务，精力值 ${energy.toInt()}%，建议先完成最短任务：${tasks.minByOrNull { it.estimatedMinutes }?.title ?: "当前任务"}。"
     }
-}
 
     return runCatching {
         val connection = URL(LLM_API_URL).openConnection() as HttpURLConnection
@@ -381,7 +380,10 @@ private suspend fun fetchAiRecommendation(tasks: List<StudyTask>, energy: Float)
 
 private fun parseRecommendationFromResponse(responseText: String): String {
     if (responseText.isBlank()) return "模型返回为空，请检查接口输出格式。"
-    val json = JSONObject(responseText)
+
+    val json = runCatching { JSONObject(responseText) }.getOrNull()
+        ?: return "模型返回不是合法 JSON：${responseText.take(120)}"
+
     json.optString("recommendation").takeIf { it.isNotBlank() }?.let { return it }
     json.optString("output").takeIf { it.isNotBlank() }?.let { return it }
 
@@ -389,8 +391,7 @@ private fun parseRecommendationFromResponse(responseText: String): String {
     if (choices != null && choices.length() > 0) {
         val first = choices.optJSONObject(0)
         first?.optString("text")?.takeIf { it.isNotBlank() }?.let { return it }
-        val message = first?.optJSONObject("message")
-        message?.optString("content")?.takeIf { it.isNotBlank() }?.let { return it }
+        first?.optJSONObject("message")?.optString("content")?.takeIf { it.isNotBlank() }?.let { return it }
     }
 
     return "模型返回缺少 recommendation 字段，请按约定返回。"
