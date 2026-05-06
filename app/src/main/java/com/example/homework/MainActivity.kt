@@ -64,17 +64,17 @@ data class StudyTask(
     val energyNeed: Float
 )
 
-private const val PREFS_NAME = "study_agent_prefs"
-private const val KEY_TODO_TASKS = "todo_tasks"
-private const val KEY_DONE_TASKS = "done_tasks"
-private const val LLM_API_URL = "" // TODO: 替换为你的大模型接口
-private const val LLM_API_KEY = "" // TODO: 替换为你的 API Key
-
 private val DEFAULT_TASKS = listOf(
     StudyTask("复习Kotlin协程", 40, 0.6f),
     StudyTask("整理移动互联网知识点", 30, 0.4f),
     StudyTask("课程大作业功能测试", 25, 0.5f)
 )
+
+private const val PREFS_NAME = "study_agent_prefs"
+private const val KEY_TODO_TASKS = "todo_tasks"
+private const val KEY_DONE_TASKS = "done_tasks"
+private const val LLM_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+private const val LLM_API_KEY = "sk-ceb7fd17109949bf9e6cc8c39e4b8d7d"
 
 @OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
@@ -223,7 +223,7 @@ private fun PlannerCard(
             TaskSection(
                 title = "待完成任务",
                 tasks = tasks,
-                maxVisibleItems = 3,
+                height = 180.dp,
                 cardColor = Color(0xFFF5F7FF),
                 statusText = null,
                 onPrimaryAction = onCompleteTask,
@@ -235,7 +235,7 @@ private fun PlannerCard(
             TaskSection(
                 title = "已完成任务",
                 tasks = completedTasks,
-                maxVisibleItems = 3,
+                height = 140.dp,
                 cardColor = Color(0xFFDFF5E4),
                 statusText = "已完成",
                 onPrimaryAction = null,
@@ -331,6 +331,7 @@ private suspend fun fetchAiRecommendation(tasks: List<StudyTask>, energy: Float)
     if (LLM_API_URL.isBlank()) {
         return "（待接入大模型 API）当前有 ${tasks.size} 个待完成任务，精力值 ${energy.toInt()}%，建议先完成最短任务：${tasks.minByOrNull { it.estimatedMinutes }?.title ?: "当前任务"}。"
     }
+}
 
     return runCatching {
         val connection = URL(LLM_API_URL).openConnection() as HttpURLConnection
