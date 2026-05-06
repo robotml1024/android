@@ -8,7 +8,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,7 +25,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -55,13 +53,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
-
-enum class Mood(val label: String, val emoji: String) {
-    FOCUSED("专注", "🧠"),
-    TIRED("疲惫", "😪"),
-    STRESSED("压力大", "😵"),
-    HAPPY("心情好", "😄")
-}
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
 
 data class StudyTask(
     val title: String,
@@ -72,6 +66,8 @@ data class StudyTask(
 private const val PREFS_NAME = "study_agent_prefs"
 private const val KEY_TODO_TASKS = "todo_tasks"
 private const val KEY_DONE_TASKS = "done_tasks"
+private const val LLM_API_URL = "" // TODO: 替换为你的大模型接口
+private const val LLM_API_KEY = "" // TODO: 替换为你的 API Key
 
 @OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
@@ -98,10 +94,11 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var selectedMood by remember { mutableStateOf(Mood.FOCUSED) }
     var energy by remember { mutableFloatStateOf(70f) }
     var taskInput by remember { mutableStateOf("") }
     var durationInput by remember { mutableStateOf("30") }
+    var recommendation by remember { mutableStateOf("正在生成建议...") }
+
     val tasks = remember { mutableStateListOf<StudyTask>() }
     val completedTasks = remember { mutableStateListOf<StudyTask>() }
 
@@ -122,16 +119,18 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
         }
     }
 
-    val completionRate = if (tasks.isEmpty() && completedTasks.isEmpty()) 0f
-    else completedTasks.size / (tasks.size + completedTasks.size).toFloat()
-    val recommendation = generateRecommendation(selectedMood, energy, tasks)
-    val statusAction = generateStatusAction(selectedMood, energy)
+    LaunchedEffect(tasks.size, energy.toInt()) {
+        recommendation = fetchAiRecommendation(tasks, energy)
+    }
 
     fun persist() {
         scope.launch(Dispatchers.IO) {
             saveTasks(context, tasks, completedTasks)
         }
     }
+
+    val completionRate = if (tasks.isEmpty() && completedTasks.isEmpty()) 0f
+    else completedTasks.size / (tasks.size + completedTasks.size).toFloat()
 
     Column(
         modifier = modifier
@@ -145,21 +144,10 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
             Column(Modifier.padding(14.dp)) {
                 Text("1) 当前状态采集", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
-                Text("今天你的学习心情？")
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Mood.entries.forEach { mood ->
-                        FilterChip(
-                            selected = selectedMood == mood,
-                            onClick = { selectedMood = mood },
-                            label = { Text("${mood.emoji} ${mood.label}") }
-                        )
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
                 Text("当前精力值：${energy.toInt()}%")
                 Slider(value = energy, onValueChange = { energy = it }, valueRange = 0f..100f)
                 Spacer(Modifier.height(8.dp))
-                Text("状态动作建议：$statusAction")
+                Text("状态动作建议：${generateStatusAction(energy)}")
             }
         }
 
@@ -181,35 +169,24 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        val minute = durationInput.toIntOrNull()?.coerceIn(5, 180) ?: 30
-                        if (taskInput.isNotBlank()) {
-                            val baseNeed = (minute / 180f).coerceIn(0.2f, 1f)
-                            val adjustedNeed = when (selectedMood) {
-                                Mood.FOCUSED, Mood.HAPPY -> (baseNeed + 0.1f).coerceAtMost(1f)
-                                Mood.TIRED, Mood.STRESSED -> (baseNeed - 0.1f).coerceAtLeast(0.2f)
-                            }
-                            tasks.add(StudyTask(taskInput.trim(), minute, adjustedNeed))
-                            taskInput = ""
-                            persist()
-                        }
+                Button(onClick = {
+                    val minute = durationInput.toIntOrNull()?.coerceIn(5, 180) ?: 30
+                    if (taskInput.isNotBlank()) {
+                        val baseNeed = (minute / 180f).coerceIn(0.2f, 1f)
+                        val adjustedNeed = adjustEnergyNeedByCurrentEnergy(baseNeed, energy)
+                        tasks.add(StudyTask(taskInput.trim(), minute, adjustedNeed))
+                        taskInput = ""
+                        persist()
                     }
-                ) { Text("加入计划") }
+                }) { Text("加入计划") }
 
                 Spacer(Modifier.height(12.dp))
                 Text("待完成任务", fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(6.dp))
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(180.dp)) {
                     items(tasks) { task ->
-                        Card(
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F7FF))
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                        Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F7FF))) {
+                            Row(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text(task.title, fontWeight = FontWeight.SemiBold)
                                     Text("${task.estimatedMinutes} 分钟 · 任务强度 ${"%.1f".format(task.energyNeed * 10)}")
@@ -235,10 +212,7 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
                 Spacer(Modifier.height(6.dp))
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(140.dp)) {
                     items(completedTasks) { task ->
-                        Card(
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFFDFF5E4))
-                        ) {
+                        Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFDFF5E4))) {
                             Row(modifier = Modifier.fillMaxWidth().padding(10.dp)) {
                                 Column(Modifier.weight(1f)) {
                                     Text(task.title, fontWeight = FontWeight.SemiBold)
@@ -262,31 +236,94 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
     }
 }
 
-private fun generateStatusAction(mood: Mood, energy: Float): String {
+private fun generateStatusAction(energy: Float): String {
     return when {
         energy < 30 -> "先安排 10~15 分钟低强度任务，避免硬扛。"
-        mood == Mood.STRESSED -> "先深呼吸 2 分钟，再开始一个最短任务建立节奏。"
-        mood == Mood.FOCUSED && energy > 75 -> "状态很好，优先推进高强度任务。"
+        energy > 75 -> "状态很好，优先推进高强度任务。"
         else -> "先完成一个 25~30 分钟任务，然后短休息。"
     }
 }
 
-fun generateRecommendation(mood: Mood, energy: Float, tasks: List<StudyTask>): String {
-    if (tasks.isEmpty()) return "当前没有待完成任务，建议新增一个可在 30 分钟内完成的小目标。"
-    val nextTask = when {
-        energy < 35 -> tasks.minByOrNull { it.energyNeed }
-        energy > 75 -> tasks.maxByOrNull { it.energyNeed }
-        else -> tasks.minByOrNull { it.estimatedMinutes }
-    } ?: tasks.first()
+private fun adjustEnergyNeedByCurrentEnergy(baseNeed: Float, energy: Float): Float {
+    return when {
+        energy > 75 -> (baseNeed + 0.1f).coerceAtMost(1f)
+        energy < 35 -> (baseNeed - 0.1f).coerceAtLeast(0.2f)
+        else -> baseNeed
+    }
+}
 
-    val moodAdvice = when (mood) {
-        Mood.FOCUSED -> "你处于高专注状态，建议优先处理困难任务。"
-        Mood.TIRED -> "当前较疲惫，建议先做 15 分钟轻任务热身。"
-        Mood.STRESSED -> "压力偏高，建议先做呼吸放松，再采用番茄钟节奏。"
-        Mood.HAPPY -> "心情积极，适合推进创造性任务并记录灵感。"
+private suspend fun fetchAiRecommendation(tasks: List<StudyTask>, energy: Float): String {
+    if (tasks.isEmpty()) return "当前没有待完成任务，建议新增一个可在 30 分钟内完成的小目标。"
+    if (LLM_API_URL.isBlank()) {
+        return "（待接入大模型 API）当前有 ${tasks.size} 个待完成任务，精力值 ${energy.toInt()}%，建议先完成最短任务：${tasks.minByOrNull { it.estimatedMinutes }?.title ?: "当前任务"}。"
     }
 
-    return "$moodAdvice 推荐下一项：${nextTask.title}（约 ${nextTask.estimatedMinutes} 分钟）。"
+    return runCatching {
+        val connection = URL(LLM_API_URL).openConnection() as HttpURLConnection
+        connection.requestMethod = "POST"
+        connection.setRequestProperty("Content-Type", "application/json")
+        if (LLM_API_KEY.isNotBlank()) {
+            connection.setRequestProperty("Authorization", "Bearer $LLM_API_KEY")
+        }
+        connection.doOutput = true
+
+        val payload = JSONObject()
+            .put("energy", energy.toInt())
+            .put("todoTasks", JSONArray().apply {
+                tasks.forEach {
+                    put(
+                        JSONObject()
+                            .put("title", it.title)
+                            .put("estimatedMinutes", it.estimatedMinutes)
+                            .put("energyNeed", it.energyNeed)
+                    )
+                }
+            })
+
+        OutputStreamWriter(connection.outputStream).use { it.write(payload.toString()) }
+
+        val responseText = connection.inputStream.bufferedReader().use { it.readText() }
+        val responseJson = JSONObject(responseText)
+        responseJson.optString("recommendation").ifBlank { "模型返回为空，请检查接口输出格式。" }
+    }.getOrElse { error ->
+        "智能建议获取失败：${error.message ?: "未知错误"}"
+    }
+}
+
+private fun saveTasks(context: Context, todo: List<StudyTask>, done: List<StudyTask>) {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    prefs.edit()
+        .putString(KEY_TODO_TASKS, tasksToJson(todo).toString())
+        .putString(KEY_DONE_TASKS, tasksToJson(done).toString())
+        .apply()
+}
+
+private fun loadTasks(context: Context): Pair<List<StudyTask>, List<StudyTask>> {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val todoJson = prefs.getString(KEY_TODO_TASKS, null)
+    val doneJson = prefs.getString(KEY_DONE_TASKS, null)
+    return Pair(jsonToTasks(todoJson), jsonToTasks(doneJson))
+}
+
+private fun tasksToJson(tasks: List<StudyTask>): JSONArray {
+    val arr = JSONArray()
+    tasks.forEach { task ->
+        arr.put(JSONObject().put("title", task.title).put("estimatedMinutes", task.estimatedMinutes).put("energyNeed", task.energyNeed.toDouble()))
+    }
+    return arr
+}
+
+private fun jsonToTasks(raw: String?): List<StudyTask> {
+    if (raw.isNullOrBlank()) return emptyList()
+    return try {
+        val arr = JSONArray(raw)
+        List(arr.length()) { index ->
+            val obj = arr.getJSONObject(index)
+            StudyTask(obj.optString("title"), obj.optInt("estimatedMinutes", 30), obj.optDouble("energyNeed", 0.4).toFloat())
+        }
+    } catch (_: Exception) {
+        emptyList()
+    }
 }
 
 private fun saveTasks(context: Context, todo: List<StudyTask>, done: List<StudyTask>) {
