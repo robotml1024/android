@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -250,7 +251,7 @@ private fun PlannerCard(
 private fun TaskSection(
     title: String,
     tasks: List<StudyTask>,
-    height: androidx.compose.ui.unit.Dp,
+    maxVisibleItems: Int,
     cardColor: Color,
     statusText: String?,
     onPrimaryAction: ((StudyTask) -> Unit)?,
@@ -261,7 +262,11 @@ private fun TaskSection(
     Spacer(Modifier.height(12.dp))
     Text(title, fontWeight = FontWeight.SemiBold)
     Spacer(Modifier.height(6.dp))
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(height)) {
+    val maxHeight = (maxVisibleItems * 64).dp
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.heightIn(max = maxHeight)
+    ) {
         items(tasks) { task ->
             TaskItemCard(
                 task = task,
@@ -326,17 +331,22 @@ private suspend fun fetchAiRecommendation(tasks: List<StudyTask>, energy: Float)
     if (LLM_API_URL.isBlank()) {
         return "（待接入大模型 API）当前有 ${tasks.size} 个待完成任务，精力值 ${energy.toInt()}%，建议先完成最短任务：${tasks.minByOrNull { it.estimatedMinutes }?.title ?: "当前任务"}。"
     }
+}
 
     return runCatching {
         val connection = URL(LLM_API_URL).openConnection() as HttpURLConnection
         connection.requestMethod = "POST"
         connection.setRequestProperty("Content-Type", "application/json")
+        connection.setRequestProperty("Accept", "application/json")
         if (LLM_API_KEY.isNotBlank()) {
             connection.setRequestProperty("Authorization", "Bearer $LLM_API_KEY")
         }
         connection.doOutput = true
+        connection.connectTimeout = 15000
+        connection.readTimeout = 15000
 
-        val payload = JSONObject()
+        val systemPrompt = "你是一名学习规划助手。请基于用户待完成任务与当前精力值，输出中文建议：先做哪项任务、原因、执行时长建议（简短明确）。"
+        val userPayload = JSONObject()
             .put("energy", energy.toInt())
             .put("todoTasks", JSONArray().apply {
                 tasks.forEach {
@@ -344,14 +354,46 @@ private suspend fun fetchAiRecommendation(tasks: List<StudyTask>, energy: Float)
                 }
             })
 
+        val payload = JSONObject()
+            .put("system", systemPrompt)
+            .put("messages", JSONArray().apply {
+                put(JSONObject().put("role", "system").put("content", systemPrompt))
+                put(JSONObject().put("role", "user").put("content", userPayload.toString()))
+            })
+            .put("energy", energy.toInt())
+            .put("todoTasks", userPayload.getJSONArray("todoTasks"))
+
         OutputStreamWriter(connection.outputStream).use { it.write(payload.toString()) }
 
-        val responseText = connection.inputStream.bufferedReader().use { it.readText() }
-        val responseJson = JSONObject(responseText)
-        responseJson.optString("recommendation").ifBlank { "模型返回为空，请检查接口输出格式。" }
+        val statusCode = connection.responseCode
+        val stream = if (statusCode in 200..299) connection.inputStream else connection.errorStream
+        val responseText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+
+        if (statusCode !in 200..299) {
+            throw IllegalStateException("HTTP $statusCode: ${responseText.ifBlank { "empty error body" }}")
+        }
+
+        parseRecommendationFromResponse(responseText)
     }.getOrElse { error ->
         "智能建议获取失败：${error.message ?: "未知错误"}"
     }
+}
+
+private fun parseRecommendationFromResponse(responseText: String): String {
+    if (responseText.isBlank()) return "模型返回为空，请检查接口输出格式。"
+    val json = JSONObject(responseText)
+    json.optString("recommendation").takeIf { it.isNotBlank() }?.let { return it }
+    json.optString("output").takeIf { it.isNotBlank() }?.let { return it }
+
+    val choices = json.optJSONArray("choices")
+    if (choices != null && choices.length() > 0) {
+        val first = choices.optJSONObject(0)
+        first?.optString("text")?.takeIf { it.isNotBlank() }?.let { return it }
+        val message = first?.optJSONObject("message")
+        message?.optString("content")?.takeIf { it.isNotBlank() }?.let { return it }
+    }
+
+    return "模型返回缺少 recommendation 字段，请按约定返回。"
 }
 
 private fun saveTasks(context: Context, todo: List<StudyTask>, done: List<StudyTask>) {
