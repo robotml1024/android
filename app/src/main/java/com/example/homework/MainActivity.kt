@@ -326,6 +326,51 @@ private fun jsonToTasks(raw: String?): List<StudyTask> {
     }
 }
 
+private fun saveTasks(context: Context, todo: List<StudyTask>, done: List<StudyTask>) {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    prefs.edit()
+        .putString(KEY_TODO_TASKS, tasksToJson(todo).toString())
+        .putString(KEY_DONE_TASKS, tasksToJson(done).toString())
+        .apply()
+}
+
+private fun loadTasks(context: Context): Pair<List<StudyTask>, List<StudyTask>> {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val todoJson = prefs.getString(KEY_TODO_TASKS, null)
+    val doneJson = prefs.getString(KEY_DONE_TASKS, null)
+    return Pair(jsonToTasks(todoJson), jsonToTasks(doneJson))
+}
+
+private fun tasksToJson(tasks: List<StudyTask>): JSONArray {
+    val arr = JSONArray()
+    tasks.forEach { task ->
+        arr.put(
+            JSONObject()
+                .put("title", task.title)
+                .put("estimatedMinutes", task.estimatedMinutes)
+                .put("energyNeed", task.energyNeed.toDouble())
+        )
+    }
+    return arr
+}
+
+private fun jsonToTasks(raw: String?): List<StudyTask> {
+    if (raw.isNullOrBlank()) return emptyList()
+    return try {
+        val arr = JSONArray(raw)
+        List(arr.length()) { index ->
+            val obj = arr.getJSONObject(index)
+            StudyTask(
+                title = obj.optString("title"),
+                estimatedMinutes = obj.optInt("estimatedMinutes", 30),
+                energyNeed = obj.optDouble("energyNeed", 0.4).toFloat()
+            )
+        }
+    } catch (_: Exception) {
+        emptyList()
+    }
+}
+
 @Preview(showBackground = true)
 @Composable
 fun StudyAgentPreview() {
