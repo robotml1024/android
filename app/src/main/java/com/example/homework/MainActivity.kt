@@ -1,5 +1,6 @@
 package com.example.homework
 
+import android.Manifest
 import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -58,10 +59,16 @@ import java.net.URL
 import kotlinx.coroutines.withContext
 import com.halilibo.richtext.markdown.Markdown
 import com.halilibo.richtext.ui.material3.RichText
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import androidx.annotation.RequiresPermission
+import java.util.Calendar
 
 data class StudyTask(
     val title: String,
-    val estimatedMinutes: Int
+    val estimatedMinutes: Int,
+    val category: String,
+    val deadline: String
 )
 
 private const val PREFS_NAME = "study_agent_prefs"
@@ -96,10 +103,32 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
 
     var taskInput by remember { mutableStateOf("") }
     var durationInput by remember { mutableStateOf("30") }
-    var recommendation by remember { mutableStateOf("正在生成建议...") }
+    var categoryInput by remember { mutableStateOf("编程") }
+    var deadlineInput by remember { mutableStateOf("") }
+    var recommendation by remember { mutableStateOf("智能建议生成中...") }
+    var recommendationFailed by remember { mutableStateOf(false) }
 
     val tasks = remember { mutableStateListOf<StudyTask>() }
     val completedTasks = remember { mutableStateListOf<StudyTask>() }
+
+    fun refreshRecommendation() {
+        scope.launch @androidx.annotation.RequiresPermission(android.Manifest.permission.ACCESS_NETWORK_STATE) {
+            recommendationFailed = false
+            recommendation = "智能建议生成中..."
+
+            val timeContext = getCurrentTimeContext()
+            val networkContext = getNetworkContext(context)
+
+            val result = fetchAiRecommendation(
+                tasks = tasks,
+                timeContext = timeContext,
+                networkContext = networkContext
+            )
+
+            recommendation = result
+            recommendationFailed = result.startsWith("智能建议获取失败")
+        }
+    }
 
     LaunchedEffect(Unit) {
         val loaded = loadTasks(context)
@@ -109,8 +138,8 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
         completedTasks.addAll(loaded.second)
     }
 
-    LaunchedEffect(tasks.size) {
-        recommendation = fetchAiRecommendation(tasks)
+    LaunchedEffect(tasks.toList()) {
+        refreshRecommendation()
     }
 
     fun persist() {
@@ -135,12 +164,23 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
             onTaskInputChange = { taskInput = it },
             durationInput = durationInput,
             onDurationInputChange = { durationInput = it },
+            categoryInput = categoryInput,
+            onCategoryInputChange = { categoryInput = it },
+            deadlineInput = deadlineInput,
+            onDeadlineInputChange = { deadlineInput = it },
             tasks = tasks,
             completedTasks = completedTasks,
             onAddTask = {
                 val minute = durationInput.toIntOrNull()?.coerceIn(5, 180) ?: 30
                 if (taskInput.isNotBlank()) {
-                    tasks.add(StudyTask(taskInput.trim(), minute))
+                    tasks.add(
+                        StudyTask(
+                            title = taskInput.trim(),
+                            estimatedMinutes = minute,
+                            category = categoryInput.ifBlank { "未分类" },
+                            deadline = deadlineInput.ifBlank { "无" }
+                        )
+                    )
                     taskInput = ""
                     persist()
                 }
@@ -176,6 +216,14 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
                 RichText {
                     Markdown(recommendation)
                 }
+
+                if (recommendationFailed) {
+                    TextButton(
+                        onClick = { refreshRecommendation() }
+                    ) {
+                        Text("重试")
+                    }
+                }
             }
         }
     }
@@ -187,6 +235,10 @@ private fun PlannerCard(
     onTaskInputChange: (String) -> Unit,
     durationInput: String,
     onDurationInputChange: (String) -> Unit,
+    categoryInput: String,
+    onCategoryInputChange: (String) -> Unit,
+    deadlineInput: String,
+    onDeadlineInputChange: (String) -> Unit,
     tasks: List<StudyTask>,
     completedTasks: List<StudyTask>,
     onAddTask: () -> Unit,
@@ -204,6 +256,20 @@ private fun PlannerCard(
                 value = durationInput,
                 onValueChange = { onDurationInputChange(it.filter { ch -> ch.isDigit() }) },
                 label = { Text("预计时长(分钟)") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = categoryInput,
+                onValueChange = onCategoryInputChange,
+                label = { Text("任务类型（如 编程 / 阅读 / 背诵）") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = deadlineInput,
+                onValueChange = onDeadlineInputChange,
+                label = { Text("截止时间（如 今天 / 明晚 / 2026-05-10）") },
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(Modifier.height(8.dp))
@@ -295,6 +361,8 @@ private fun TaskItemCard(
             Column(Modifier.weight(1f)) {
                 Text(task.title, fontWeight = FontWeight.SemiBold)
                 Text("${task.estimatedMinutes} 分钟")
+                Text("类型：${task.category}")
+                Text("DDL：${task.deadline}")
             }
             when {
                 statusText != null -> Text(statusText, color = Color(0xFF2E7D32))
@@ -309,7 +377,11 @@ private fun TaskItemCard(
     }
 }
 
-private suspend fun fetchAiRecommendation(tasks: List<StudyTask>): String {
+private suspend fun fetchAiRecommendation(
+    tasks: List<StudyTask>,
+    timeContext: String,
+    networkContext: String
+): String {
     if (tasks.isEmpty()) {
         return "当前没有待完成任务，建议新增一个可在 30 分钟内完成的小目标。"
     }
@@ -323,18 +395,28 @@ private suspend fun fetchAiRecommendation(tasks: List<StudyTask>): String {
             connection.setRequestProperty("Accept", "application/json")
             connection.setRequestProperty("Authorization", "Bearer $LLM_API_KEY")
             connection.doOutput = true
-            connection.connectTimeout = 15000
-            connection.readTimeout = 15000
+            connection.connectTimeout = 20000
+            connection.readTimeout = 25000
 
-            val systemPrompt = "你是一名学习规划助手。请基于用户待完成任务，请输出Markdown格式的中文建议：先做哪项任务、原因、执行时长建议（简短明确）。"
+            val systemPrompt =
+                """
+                你是一名学习规划助手。
+                请结合当前时间、网络状态、任务时长、难度、类型和截止时间，
+                给出最合理的学习建议。
+                请使用 Markdown 表格输出，内容简洁明确。
+                """.trimIndent()
 
             val userPayload = JSONObject()
+                .put("timeContext", timeContext)
+                .put("networkContext", networkContext)
                 .put("todoTasks", JSONArray().apply {
                     tasks.forEach {
                         put(
                             JSONObject()
                                 .put("title", it.title)
                                 .put("estimatedMinutes", it.estimatedMinutes)
+                                .put("category", it.category)
+                                .put("deadline", it.deadline)
                         )
                     }
                 })
@@ -404,10 +486,45 @@ private fun loadTasks(context: Context): Pair<List<StudyTask>, List<StudyTask>> 
     return Pair(jsonToTasks(todoJson), jsonToTasks(doneJson))
 }
 
+private fun getCurrentTimeContext(): String {
+    val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+
+    return when (hour) {
+        in 5..11 -> "上午"
+        in 12..17 -> "下午"
+        in 18..22 -> "晚上"
+        else -> "深夜"
+    }
+}
+
+@RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
+private fun getNetworkContext(context: Context): String {
+    val connectivityManager =
+        context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+    val network = connectivityManager.activeNetwork ?: return "无网络"
+
+    val capabilities =
+        connectivityManager.getNetworkCapabilities(network) ?: return "无网络"
+
+    return when {
+        capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+        capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "蜂窝网络"
+        capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "有线网络"
+        else -> "未知网络"
+    }
+}
+
 private fun tasksToJson(tasks: List<StudyTask>): JSONArray {
     val arr = JSONArray()
     tasks.forEach { task ->
-        arr.put(JSONObject().put("title", task.title).put("estimatedMinutes", task.estimatedMinutes))
+        arr.put(
+            JSONObject()
+                .put("title", task.title)
+                .put("estimatedMinutes", task.estimatedMinutes)
+                .put("category", task.category)
+                .put("deadline", task.deadline)
+        )
     }
     return arr
 }
@@ -418,7 +535,12 @@ private fun jsonToTasks(raw: String?): List<StudyTask> {
         val arr = JSONArray(raw)
         List(arr.length()) { index ->
             val obj = arr.getJSONObject(index)
-            StudyTask(obj.optString("title"), obj.optInt("estimatedMinutes", 30))
+            StudyTask(
+                title = obj.optString("title"),
+                estimatedMinutes = obj.optInt("estimatedMinutes", 30),
+                category = obj.optString("category", "未分类"),
+                deadline = obj.optString("deadline", "无")
+            )
         }
     } catch (_: Exception) {
         emptyList()
