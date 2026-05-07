@@ -55,7 +55,6 @@ import org.json.JSONObject
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
-
 import kotlinx.coroutines.withContext
 import com.halilibo.richtext.markdown.Markdown
 import com.halilibo.richtext.ui.material3.RichText
@@ -63,6 +62,8 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import androidx.annotation.RequiresPermission
 import java.util.Calendar
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 data class StudyTask(
     val title: String,
@@ -119,8 +120,9 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
             val timeContext = getCurrentTimeContext()
             val networkContext = getNetworkContext(context)
 
+            val sortedTasks = tasks.sortedBy { parseDeadline(it.deadline) }
             val result = fetchAiRecommendation(
-                tasks = tasks,
+                tasks = sortedTasks,
                 timeContext = timeContext,
                 networkContext = networkContext
             )
@@ -168,7 +170,7 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
             onCategoryInputChange = { categoryInput = it },
             deadlineInput = deadlineInput,
             onDeadlineInputChange = { deadlineInput = it },
-            tasks = tasks,
+            tasks = tasks.sortedBy { parseDeadline(it.deadline) },
             completedTasks = completedTasks,
             onAddTask = {
                 val minute = durationInput.toIntOrNull()?.coerceIn(5, 180) ?: 30
@@ -545,6 +547,19 @@ private fun jsonToTasks(raw: String?): List<StudyTask> {
     } catch (_: Exception) {
         emptyList()
     }
+}
+
+private fun parseDeadline(deadline: String): Long {
+    if (deadline.isBlank() || deadline == "无") {
+        return Long.MAX_VALUE
+    }
+
+    return runCatching {
+        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+            .parse(deadline)
+            ?.time
+            ?: Long.MAX_VALUE
+    }.getOrDefault(Long.MAX_VALUE)
 }
 
 @Preview(showBackground = true)
