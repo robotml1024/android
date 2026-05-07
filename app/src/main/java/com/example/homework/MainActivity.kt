@@ -61,12 +61,6 @@ data class StudyTask(
     val energyNeed: Float
 )
 
-private val DEFAULT_TASKS = listOf(
-    StudyTask("复习Kotlin协程", 40, 0.6f),
-    StudyTask("整理移动互联网知识点", 30, 0.4f),
-    StudyTask("课程大作业功能测试", 25, 0.5f)
-)
-
 private const val PREFS_NAME = "study_agent_prefs"
 private const val KEY_TODO_TASKS = "todo_tasks"
 private const val KEY_DONE_TASKS = "done_tasks"
@@ -110,9 +104,6 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
         tasks.addAll(loaded.first)
         completedTasks.clear()
         completedTasks.addAll(loaded.second)
-        if (tasks.isEmpty() && completedTasks.isEmpty()) {
-            tasks.addAll(DEFAULT_TASKS)
-        }
     }
 
     LaunchedEffect(tasks.size, energy.toInt()) {
@@ -170,7 +161,7 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
 
         Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("3) 智能建议引擎", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("2) 智能建议引擎", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text("完成率：${(completionRate * 100).toInt()}%")
                 Text(recommendation)
             }
@@ -193,7 +184,7 @@ private fun PlannerCard(
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
         Column(Modifier.padding(14.dp)) {
-            Text("2) AI任务规划", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("1) AI任务规划", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(value = taskInput, onValueChange = onTaskInputChange, label = { Text("新增学习任务") }, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(8.dp))
@@ -287,51 +278,18 @@ private fun TaskItemCard(
     onSecondaryAction: ((StudyTask) -> Unit)?,
     secondaryActionText: String?
 ) {
-    Card(
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = cardColor)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+    Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = cardColor)) {
+        Row(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(task.title, fontWeight = FontWeight.SemiBold)
-
-                Text(
-                    "${task.estimatedMinutes} 分钟 · 任务强度 ${
-                        "%.1f".format(task.energyNeed * 10)
-                    }"
-                )
+                Text("${task.estimatedMinutes} 分钟 · 任务强度 ${"%.1f".format(task.energyNeed * 10)}")
             }
-
             when {
-                statusText != null -> {
-                    Text(
-                        statusText,
-                        color = Color(0xFF2E7D32)
-                    )
-                }
-
-                onPrimaryAction != null &&
-                        primaryActionText != null &&
-                        onSecondaryAction != null &&
-                        secondaryActionText != null -> {
-
+                statusText != null -> Text(statusText, color = Color(0xFF2E7D32))
+                onPrimaryAction != null && primaryActionText != null && onSecondaryAction != null && secondaryActionText != null -> {
                     Row {
-                        TextButton(
-                            onClick = { onPrimaryAction(task) }
-                        ) {
-                            Text(primaryActionText)
-                        }
-
-                        TextButton(
-                            onClick = { onSecondaryAction(task) }
-                        ) {
-                            Text(secondaryActionText)
-                        }
+                        TextButton(onClick = { onPrimaryAction(task) }) { Text(primaryActionText) }
+                        TextButton(onClick = { onSecondaryAction(task) }) { Text(secondaryActionText) }
                     }
                 }
             }
