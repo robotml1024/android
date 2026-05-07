@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -65,9 +64,8 @@ data class StudyTask(
 private const val PREFS_NAME = "study_agent_prefs"
 private const val KEY_TODO_TASKS = "todo_tasks"
 private const val KEY_DONE_TASKS = "done_tasks"
-private const val LLM_API_URL = "" // TODO: 替换为你的大模型接口
-private const val LLM_API_KEY = "" // TODO: 替换为你的 API Key
-
+private const val LLM_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+private const val LLM_API_KEY = "sk-ceb7fd17109949bf9e6cc8c39e4b8d7d"
 
 @OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
