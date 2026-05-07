@@ -57,8 +57,7 @@ import java.net.URL
 
 data class StudyTask(
     val title: String,
-    val estimatedMinutes: Int,
-    val energyNeed: Float
+    val estimatedMinutes: Int
 )
 
 private const val PREFS_NAME = "study_agent_prefs"
@@ -90,7 +89,6 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val energy = 70f
     var taskInput by remember { mutableStateOf("") }
     var durationInput by remember { mutableStateOf("30") }
     var recommendation by remember { mutableStateOf("正在生成建议...") }
@@ -106,8 +104,8 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
         completedTasks.addAll(loaded.second)
     }
 
-    LaunchedEffect(tasks.size, energy.toInt()) {
-        recommendation = fetchAiRecommendation(tasks, energy)
+    LaunchedEffect(tasks.size) {
+        recommendation = fetchAiRecommendation(tasks)
     }
 
     fun persist() {
@@ -137,9 +135,7 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
             onAddTask = {
                 val minute = durationInput.toIntOrNull()?.coerceIn(5, 180) ?: 30
                 if (taskInput.isNotBlank()) {
-                    val baseNeed = (minute / 180f).coerceIn(0.2f, 1f)
-                    val adjustedNeed = adjustEnergyNeedByCurrentEnergy(baseNeed, energy)
-                    tasks.add(StudyTask(taskInput.trim(), minute, adjustedNeed))
+                    tasks.add(StudyTask(taskInput.trim(), minute))
                     taskInput = ""
                     persist()
                 }
@@ -282,7 +278,7 @@ private fun TaskItemCard(
         Row(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(task.title, fontWeight = FontWeight.SemiBold)
-                Text("${task.estimatedMinutes} 分钟 · 任务强度 ${"%.1f".format(task.energyNeed * 10)}")
+                Text("${task.estimatedMinutes} 分钟")
             }
             when {
                 statusText != null -> Text(statusText, color = Color(0xFF2E7D32))
@@ -297,18 +293,12 @@ private fun TaskItemCard(
     }
 }
 
-private fun adjustEnergyNeedByCurrentEnergy(baseNeed: Float, energy: Float): Float {
-    return when {
-        energy > 75 -> (baseNeed + 0.1f).coerceAtMost(1f)
-        energy < 35 -> (baseNeed - 0.1f).coerceAtLeast(0.2f)
-        else -> baseNeed
-    }
-}
 
-private suspend fun fetchAiRecommendation(tasks: List<StudyTask>, energy: Float): String {
+
+private suspend fun fetchAiRecommendation(tasks: List<StudyTask>): String {
     if (tasks.isEmpty()) return "当前没有待完成任务，建议新增一个可在 30 分钟内完成的小目标。"
     if (LLM_API_URL.isBlank()) {
-        return "（待接入大模型 API）当前有 ${tasks.size} 个待完成任务，精力值 ${energy.toInt()}%，建议先完成最短任务：${tasks.minByOrNull { it.estimatedMinutes }?.title ?: "当前任务"}。"
+        return "（待接入大模型 API）当前有 ${tasks.size} 个待完成任务，建议先完成最短任务：${tasks.minByOrNull { it.estimatedMinutes }?.title ?: "当前任务"}。"
     }
 
     return runCatching {
@@ -323,12 +313,11 @@ private suspend fun fetchAiRecommendation(tasks: List<StudyTask>, energy: Float)
         connection.connectTimeout = 15000
         connection.readTimeout = 15000
 
-        val systemPrompt = "你是一名学习规划助手。请基于用户待完成任务与当前精力值，输出中文建议：先做哪项任务、原因、执行时长建议（简短明确）。"
+        val systemPrompt = "你是一名学习规划助手。请基于用户待完成任务，输出中文建议：先做哪项任务、原因、执行时长建议（简短明确）。"
         val userPayload = JSONObject()
-            .put("energy", energy.toInt())
             .put("todoTasks", JSONArray().apply {
                 tasks.forEach {
-                    put(JSONObject().put("title", it.title).put("estimatedMinutes", it.estimatedMinutes).put("energyNeed", it.energyNeed))
+                    put(JSONObject().put("title", it.title).put("estimatedMinutes", it.estimatedMinutes))
                 }
             })
 
@@ -338,7 +327,6 @@ private suspend fun fetchAiRecommendation(tasks: List<StudyTask>, energy: Float)
                 put(JSONObject().put("role", "system").put("content", systemPrompt))
                 put(JSONObject().put("role", "user").put("content", userPayload.toString()))
             })
-            .put("energy", energy.toInt())
             .put("todoTasks", userPayload.getJSONArray("todoTasks"))
 
         OutputStreamWriter(connection.outputStream).use { it.write(payload.toString()) }
@@ -394,7 +382,7 @@ private fun loadTasks(context: Context): Pair<List<StudyTask>, List<StudyTask>> 
 private fun tasksToJson(tasks: List<StudyTask>): JSONArray {
     val arr = JSONArray()
     tasks.forEach { task ->
-        arr.put(JSONObject().put("title", task.title).put("estimatedMinutes", task.estimatedMinutes).put("energyNeed", task.energyNeed.toDouble()))
+        arr.put(JSONObject().put("title", task.title).put("estimatedMinutes", task.estimatedMinutes))
     }
     return arr
 }
@@ -405,7 +393,7 @@ private fun jsonToTasks(raw: String?): List<StudyTask> {
         val arr = JSONArray(raw)
         List(arr.length()) { index ->
             val obj = arr.getJSONObject(index)
-            StudyTask(obj.optString("title"), obj.optInt("estimatedMinutes", 30), obj.optDouble("energyNeed", 0.4).toFloat())
+            StudyTask(obj.optString("title"), obj.optInt("estimatedMinutes", 30))
         }
     } catch (_: Exception) {
         emptyList()
