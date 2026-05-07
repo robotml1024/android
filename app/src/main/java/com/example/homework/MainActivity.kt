@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -288,33 +287,53 @@ private fun TaskItemCard(
     onSecondaryAction: ((StudyTask) -> Unit)?,
     secondaryActionText: String?
 ) {
-    Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = cardColor)) {
-        Row(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = cardColor)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Column(Modifier.weight(1f)) {
                 Text(task.title, fontWeight = FontWeight.SemiBold)
-                Text("${task.estimatedMinutes} 分钟 · 任务强度 ${"%.1f".format(task.energyNeed * 10)}")
+
+                Text(
+                    "${task.estimatedMinutes} 分钟 · 任务强度 ${
+                        "%.1f".format(task.energyNeed * 10)
+                    }"
+                )
             }
+
             when {
-                statusText != null -> Text(statusText, color = Color(0xFF2E7D32))
-                onPrimaryAction != null && primaryActionText != null && onSecondaryAction != null && secondaryActionText != null -> {
+                statusText != null -> {
+                    Text(
+                        statusText,
+                        color = Color(0xFF2E7D32)
+                    )
+                }
+
+                onPrimaryAction != null &&
+                        primaryActionText != null &&
+                        onSecondaryAction != null &&
+                        secondaryActionText != null -> {
+
                     Row {
-                        TextButton(onClick = { onPrimaryAction(task) }) { Text(primaryActionText) }
-                        TextButton(onClick = { onSecondaryAction(task) }) { Text(secondaryActionText) }
+                        TextButton(
+                            onClick = { onPrimaryAction(task) }
+                        ) {
+                            Text(primaryActionText)
+                        }
+
+                        TextButton(
+                            onClick = { onSecondaryAction(task) }
+                        ) {
+                            Text(secondaryActionText)
+                        }
                     }
                 }
-            },
-            onCompleteTask = { task ->
-                tasks.remove(task)
-                completedTasks.add(task)
-                persist()
-            },
-            onDeleteTask = { task ->
-                tasks.remove(task)
-                persist()
-            },
-            onClearCompletedTasks = {
-                completedTasks.clear()
-                persist()
             }
         }
     }
