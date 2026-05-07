@@ -335,9 +335,16 @@ private fun TaskSection(
         modifier = Modifier.heightIn(max = maxHeight)
     ) {
         items(tasks) { task ->
+            val actualColor =
+                if (statusText == null && isDeadlineNear(task.deadline)) {
+                    Color(0xFFFFE5E5)
+                } else {
+                    cardColor
+                }
+
             TaskItemCard(
                 task = task,
-                cardColor = cardColor,
+                cardColor = actualColor,
                 statusText = statusText,
                 onPrimaryAction = onPrimaryAction,
                 primaryActionText = primaryActionText,
@@ -364,7 +371,12 @@ private fun TaskItemCard(
                 Text(task.title, fontWeight = FontWeight.SemiBold)
                 Text("${task.estimatedMinutes} 分钟")
                 Text("类型：${task.category}")
-                Text("DDL：${task.deadline}")
+                Text(
+                    if (isDeadlineNear(task.deadline))
+                        "DDL：${task.deadline}（即将截止）"
+                    else
+                        "DDL：${task.deadline}"
+                )
             }
             when {
                 statusText != null -> Text(statusText, color = Color(0xFF2E7D32))
@@ -560,6 +572,16 @@ private fun parseDeadline(deadline: String): Long {
             ?.time
             ?: Long.MAX_VALUE
     }.getOrDefault(Long.MAX_VALUE)
+}
+
+private fun isDeadlineNear(deadline: String): Boolean {
+    val deadlineTime = parseDeadline(deadline)
+    if (deadlineTime == Long.MAX_VALUE) return false
+
+    val now = System.currentTimeMillis()
+    val remain = deadlineTime - now
+
+    return remain in 0..(24 * 60 * 60 * 1000L)
 }
 
 @Preview(showBackground = true)
