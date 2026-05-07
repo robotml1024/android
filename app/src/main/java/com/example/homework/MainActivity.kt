@@ -35,7 +35,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -99,7 +98,7 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var energy by remember { mutableFloatStateOf(70f) }
+    val energy = 70f
     var taskInput by remember { mutableStateOf("") }
     var durationInput by remember { mutableStateOf("30") }
     var recommendation by remember { mutableStateOf("正在生成建议...") }
@@ -139,8 +138,6 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        StatusCard(energy = energy, onEnergyChange = { energy = it })
-
         PlannerCard(
             taskInput = taskInput,
             onTaskInputChange = { taskInput = it },
@@ -184,20 +181,6 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun StatusCard(energy: Float, onEnergyChange: (Float) -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
-        Column(Modifier.padding(14.dp)) {
-            Text("1) 当前状态采集", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(8.dp))
-            Text("当前精力值：${energy.toInt()}%")
-            Slider(value = energy, onValueChange = onEnergyChange, valueRange = 0f..100f)
-            Spacer(Modifier.height(8.dp))
-            Text("状态动作建议：${generateStatusAction(energy)}")
-        }
-    }
-}
-
-@Composable
 private fun PlannerCard(
     taskInput: String,
     onTaskInputChange: (String) -> Unit,
@@ -218,7 +201,7 @@ private fun PlannerCard(
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = durationInput,
-                onValueChange = { onDurationInputChange(it.filter(Char::isDigit)) },
+                onValueChange = { onDurationInputChange(it.filter { ch -> ch.isDigit() }) },
                 label = { Text("预计时长(分钟)") },
                 modifier = Modifier.fillMaxWidth()
             )
@@ -320,16 +303,21 @@ private fun TaskItemCard(
                         TextButton(onClick = { onSecondaryAction(task) }) { Text(secondaryActionText) }
                     }
                 }
+            },
+            onCompleteTask = { task ->
+                tasks.remove(task)
+                completedTasks.add(task)
+                persist()
+            },
+            onDeleteTask = { task ->
+                tasks.remove(task)
+                persist()
+            },
+            onClearCompletedTasks = {
+                completedTasks.clear()
+                persist()
             }
         }
-    }
-}
-
-private fun generateStatusAction(energy: Float): String {
-    return when {
-        energy < 30 -> "先安排 10~15 分钟低强度任务，避免硬扛。"
-        energy > 75 -> "状态很好，优先推进高强度任务。"
-        else -> "先完成一个 25~30 分钟任务，然后短休息。"
     }
 }
 
