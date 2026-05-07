@@ -55,6 +55,10 @@ import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 
+import kotlinx.coroutines.withContext
+import com.halilibo.richtext.markdown.Markdown
+import com.halilibo.richtext.ui.material3.RichText
+
 data class StudyTask(
     val title: String,
     val estimatedMinutes: Int
@@ -63,8 +67,9 @@ data class StudyTask(
 private const val PREFS_NAME = "study_agent_prefs"
 private const val KEY_TODO_TASKS = "todo_tasks"
 private const val KEY_DONE_TASKS = "done_tasks"
-private const val LLM_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+private const val LLM_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 private const val LLM_API_KEY = "sk-ceb7fd17109949bf9e6cc8c39e4b8d7d"
+private const val LLM_MODEL_NAME = "qwen3.5-flash-2026-02-23"
 
 @OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
@@ -156,10 +161,21 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
         )
 
         Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
-            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("2) 智能建议引擎", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Column(
+                Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    "2) 智能建议引擎",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+
                 Text("完成率：${(completionRate * 100).toInt()}%")
-                Text(recommendation)
+
+                RichText {
+                    Markdown(recommendation)
+                }
             }
         }
     }
@@ -293,55 +309,64 @@ private fun TaskItemCard(
     }
 }
 
-
-
 private suspend fun fetchAiRecommendation(tasks: List<StudyTask>): String {
-    if (tasks.isEmpty()) return "当前没有待完成任务，建议新增一个可在 30 分钟内完成的小目标。"
-    if (LLM_API_URL.isBlank()) {
-        return "（待接入大模型 API）当前有 ${tasks.size} 个待完成任务，建议先完成最短任务：${tasks.minByOrNull { it.estimatedMinutes }?.title ?: "当前任务"}。"
+    if (tasks.isEmpty()) {
+        return "当前没有待完成任务，建议新增一个可在 30 分钟内完成的小目标。"
     }
 
-    return runCatching {
-        val connection = URL(LLM_API_URL).openConnection() as HttpURLConnection
-        connection.requestMethod = "POST"
-        connection.setRequestProperty("Content-Type", "application/json")
-        connection.setRequestProperty("Accept", "application/json")
-        if (LLM_API_KEY.isNotBlank()) {
+    return withContext(Dispatchers.IO) {
+        runCatching {
+            val connection = URL(LLM_API_URL).openConnection() as HttpURLConnection
+
+            connection.requestMethod = "POST"
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            connection.setRequestProperty("Accept", "application/json")
             connection.setRequestProperty("Authorization", "Bearer $LLM_API_KEY")
+            connection.doOutput = true
+            connection.connectTimeout = 15000
+            connection.readTimeout = 15000
+
+            val systemPrompt = "你是一名学习规划助手。请基于用户待完成任务，请输出Markdown格式的中文建议：先做哪项任务、原因、执行时长建议（简短明确）。"
+
+            val userPayload = JSONObject()
+                .put("todoTasks", JSONArray().apply {
+                    tasks.forEach {
+                        put(
+                            JSONObject()
+                                .put("title", it.title)
+                                .put("estimatedMinutes", it.estimatedMinutes)
+                        )
+                    }
+                })
+
+            val payload = JSONObject()
+                .put("model", LLM_MODEL_NAME)
+                .put("messages", JSONArray().apply {
+                    put(JSONObject().put("role", "system").put("content", systemPrompt))
+                    put(JSONObject().put("role", "user").put("content", userPayload.toString()))
+                })
+
+            OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use {
+                it.write(payload.toString())
+            }
+
+            val statusCode = connection.responseCode
+            val stream =
+                if (statusCode in 200..299) connection.inputStream
+                else connection.errorStream
+
+            val responseText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+
+            if (statusCode !in 200..299) {
+                throw IllegalStateException(
+                    "HTTP $statusCode: ${responseText.ifBlank { "empty error body" }}"
+                )
+            }
+
+            parseRecommendationFromResponse(responseText)
+        }.getOrElse { error ->
+            "智能建议获取失败：${error.message ?: error.javaClass.simpleName}"
         }
-        connection.doOutput = true
-        connection.connectTimeout = 15000
-        connection.readTimeout = 15000
-
-        val systemPrompt = "你是一名学习规划助手。请基于用户待完成任务，输出中文建议：先做哪项任务、原因、执行时长建议（简短明确）。"
-        val userPayload = JSONObject()
-            .put("todoTasks", JSONArray().apply {
-                tasks.forEach {
-                    put(JSONObject().put("title", it.title).put("estimatedMinutes", it.estimatedMinutes))
-                }
-            })
-
-        val payload = JSONObject()
-            .put("system", systemPrompt)
-            .put("messages", JSONArray().apply {
-                put(JSONObject().put("role", "system").put("content", systemPrompt))
-                put(JSONObject().put("role", "user").put("content", userPayload.toString()))
-            })
-            .put("todoTasks", userPayload.getJSONArray("todoTasks"))
-
-        OutputStreamWriter(connection.outputStream).use { it.write(payload.toString()) }
-
-        val statusCode = connection.responseCode
-        val stream = if (statusCode in 200..299) connection.inputStream else connection.errorStream
-        val responseText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-
-        if (statusCode !in 200..299) {
-            throw IllegalStateException("HTTP $statusCode: ${responseText.ifBlank { "empty error body" }}")
-        }
-
-        parseRecommendationFromResponse(responseText)
-    }.getOrElse { error ->
-        "智能建议获取失败：${error.message ?: "未知错误"}"
     }
 }
 
