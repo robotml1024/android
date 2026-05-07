@@ -62,17 +62,17 @@ data class StudyTask(
     val energyNeed: Float
 )
 
-private const val PREFS_NAME = "study_agent_prefs"
-private const val KEY_TODO_TASKS = "todo_tasks"
-private const val KEY_DONE_TASKS = "done_tasks"
-private const val LLM_API_URL = "" // TODO: 替换为你的大模型接口
-private const val LLM_API_KEY = "" // TODO: 替换为你的 API Key
-
 private val DEFAULT_TASKS = listOf(
     StudyTask("复习Kotlin协程", 40, 0.6f),
     StudyTask("整理移动互联网知识点", 30, 0.4f),
     StudyTask("课程大作业功能测试", 25, 0.5f)
 )
+
+private const val PREFS_NAME = "study_agent_prefs"
+private const val KEY_TODO_TASKS = "todo_tasks"
+private const val KEY_DONE_TASKS = "done_tasks"
+private const val LLM_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+private const val LLM_API_KEY = "sk-ceb7fd17109949bf9e6cc8c39e4b8d7d"
 
 @OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
@@ -302,6 +302,19 @@ private fun TaskItemCard(
                         TextButton(onClick = { onSecondaryAction(task) }) { Text(secondaryActionText) }
                     }
                 }
+            },
+            onCompleteTask = { task ->
+                tasks.remove(task)
+                completedTasks.add(task)
+                persist()
+            },
+            onDeleteTask = { task ->
+                tasks.remove(task)
+                persist()
+            },
+            onClearCompletedTasks = {
+                completedTasks.clear()
+                persist()
             }
         }
     }
