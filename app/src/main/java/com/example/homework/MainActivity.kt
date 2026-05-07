@@ -64,6 +64,10 @@ import androidx.annotation.RequiresPermission
 import java.util.Calendar
 import java.text.SimpleDateFormat
 import java.util.Locale
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 
 data class StudyTask(
     val title: String,
@@ -105,7 +109,7 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
     var taskInput by remember { mutableStateOf("") }
     var durationInput by remember { mutableStateOf("30") }
     var categoryInput by remember { mutableStateOf("编程") }
-    var deadlineInput by remember { mutableStateOf("") }
+    var deadlineInput by remember { mutableStateOf("无") }
     var recommendation by remember { mutableStateOf("智能建议生成中...") }
     var recommendationFailed by remember { mutableStateOf(false) }
 
@@ -184,6 +188,7 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
                         )
                     )
                     taskInput = ""
+                    deadlineInput = "无"
                     persist()
                 }
             },
@@ -231,6 +236,7 @@ fun StudyAgentApp(modifier: Modifier = Modifier) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PlannerCard(
     taskInput: String,
@@ -268,12 +274,41 @@ private fun PlannerCard(
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                value = deadlineInput,
-                onValueChange = onDeadlineInputChange,
-                label = { Text("截止时间（如 今天 / 明晚 / 2026-05-10）") },
-                modifier = Modifier.fillMaxWidth()
-            )
+            val ddlOptions = buildDdlOptions()
+            var deadlineExpanded by remember { mutableStateOf(false) }
+
+            ExposedDropdownMenuBox(
+                expanded = deadlineExpanded,
+                onExpandedChange = { deadlineExpanded = !deadlineExpanded }
+            ) {
+                OutlinedTextField(
+                    value = deadlineInput,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("截止时间") },
+                    trailingIcon = {
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = deadlineExpanded)
+                    },
+                    modifier = Modifier
+                        .menuAnchor()
+                        .fillMaxWidth()
+                )
+
+                DropdownMenu(
+                    expanded = deadlineExpanded,
+                    onDismissRequest = { deadlineExpanded = false }
+                ) {
+                    ddlOptions.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option) },
+                            onClick = {
+                                onDeadlineInputChange(option)
+                                deadlineExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(8.dp))
             Button(onClick = onAddTask) { Text("加入计划") }
 
@@ -567,10 +602,18 @@ private fun parseDeadline(deadline: String): Long {
     }
 
     return runCatching {
-        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-            .parse(deadline)
-            ?.time
-            ?: Long.MAX_VALUE
+        val date = SimpleDateFormat(
+            "yyyy-MM-dd",
+            Locale.getDefault()
+        ).parse(deadline) ?: return Long.MAX_VALUE
+
+        Calendar.getInstance().apply {
+            time = date
+            set(Calendar.HOUR_OF_DAY, 23)
+            set(Calendar.MINUTE, 59)
+            set(Calendar.SECOND, 59)
+            set(Calendar.MILLISECOND, 999)
+        }.timeInMillis
     }.getOrDefault(Long.MAX_VALUE)
 }
 
@@ -582,6 +625,24 @@ private fun isDeadlineNear(deadline: String): Boolean {
     val remain = deadlineTime - now
 
     return remain in 0..(24 * 60 * 60 * 1000L)
+}
+
+private fun buildDdlOptions(): List<String> {
+    val formatter = SimpleDateFormat(
+        "yyyy-MM-dd",
+        Locale.getDefault()
+    )
+
+    val calendar = Calendar.getInstance()
+
+    return buildList {
+        add("无")
+
+        repeat(30) {
+            add(formatter.format(calendar.time))
+            calendar.add(Calendar.DAY_OF_YEAR, 1)
+        }
+    }
 }
 
 @Preview(showBackground = true)
